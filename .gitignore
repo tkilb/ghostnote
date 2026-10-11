@@ -1,0 +1,13 @@
+# Binaries
+ghostnote
+
+# Go build / test cache
+*.test
+*.out
+
+# OS / Editor artifacts
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

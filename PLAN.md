@@ -199,30 +199,30 @@ ghostnote/
 ## 6. Implementation Milestones
 
 ### Phase 1: Engine & CLI Backend Foundation
-- [ ] Initialize Go module with `bubbletea`, `lipgloss`, `bubbles`, and `yaml.v3`.
-- [ ] Implement `internal/config` with defaults and disk persistence.
-- [ ] Implement `internal/metadata` heuristic title cleaning with comprehensive table-driven tests.
-- [ ] Implement `internal/engine`:
+- [x] Initialize Go module with `bubbletea`, `lipgloss`, `bubbles`, and `yaml.v3`.
+- [x] Implement `internal/config` with defaults and disk persistence.
+- [x] Implement `internal/metadata` heuristic title cleaning with comprehensive table-driven tests.
+- [x] Implement `internal/engine`:
   - `yt-dlp` metadata extraction & chapter parsing.
   - Download runner with real-time progress parsing.
   - `ffmpeg` chapter slicing, transcoding, and cover-art embedding.
-  - End-to-end headless CLI test verifying download of single track and chaptered OST.
+  - Queue coordinator with worker pool and live notification listener.
 
 ### Phase 2: TUI Components & Visual Shell
-- [ ] Port `internal/ui/panel` from `lazytask` (rounded borders, active/inactive palette, tabs).
-- [ ] Implement root `app.go` with responsive grid layout (`WindowSizeMsg` handling).
-- [ ] Build `[1] Config`, `[2] Queue`, `[3] Completed`, and `[0] Details` panel shells.
-- [ ] Implement `statusbar` and `helppopup` modals with arrow-key navigation.
-- [ ] Wire panel jumping (`0-3`, `Tab`, `Shift+Tab`) and item cursor movement (`↑`/`↓`).
+- [x] Port `internal/ui/panel` matching lazytask/lazygit (rounded borders, active/inactive palette).
+- [x] Implement root `app.go` with responsive grid layout (`WindowSizeMsg` handling).
+- [x] Build `[1] Config`, `[2] Queue`, `[3] Completed`, and `[0] Details` panel shells.
+- [x] Implement `statusbar` and `helppopup` modals with arrow-key navigation.
+- [x] Wire panel jumping (`0-3`, `Tab`, `Shift+Tab`) and item cursor movement (`↑`/`↓`).
 
 ### Phase 3: Interactive Modals & Workflow Wiring
-- [ ] Build `addmodal`: URL text input, Enter to submit, auto-populate from system clipboard.
-- [ ] Build `dirpicker`: In-TUI interactive directory browser (`↑`/`↓`, `Enter`/`Backspace`).
-- [ ] Connect `addmodal` to `engine.Queue`:
+- [x] Build `addmodal`: URL text input, Enter to submit, auto-populate from system clipboard.
+- [x] Build `dirpicker`: In-TUI interactive directory browser (`↑`/`↓`, `Enter`/`Space`/`Esc`).
+- [x] Connect `addmodal` to `engine.Queue`:
   - Detect single track vs chaptered OST.
   - Expand OST chapters into individual child queue items.
-- [ ] Wire live download progress, slicing status, and completion state into `[2] Queue`.
-- [ ] Implement `[0] Details` metadata editing (`e` key) to modify tags before/after slicing.
+- [x] Wire live download progress, slicing status, and completion state into `[2] Queue`.
+- [ ] Implement `[0] Details` inline metadata editing modal (`e` key) to modify tags before/after slicing.
 
 ### Phase 4: Polish & Refinement
 - [ ] Duplicate detection (scan target directory prior to download).
