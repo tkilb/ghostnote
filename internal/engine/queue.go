@@ -148,6 +148,31 @@ func (q *Queue) RemoveJob(id string) {
 	}
 }
 
+// RetryJob resets a failed or canceled job and puts it back on workChan.
+func (q *Queue) RetryJob(id string) {
+	q.mu.Lock()
+	var target *Job
+	for _, j := range q.jobs {
+		if j.ID == id && (j.Status == StatusFailed || j.Status == StatusCanceled) {
+			j.Status = StatusQueued
+			j.Progress = 0
+			j.ErrorMsg = ""
+			j.StartTime = time.Now()
+			target = j
+			break
+		}
+	}
+	q.mu.Unlock()
+
+	if target != nil {
+		q.notify(target)
+		select {
+		case q.workChan <- target:
+		default:
+		}
+	}
+}
+
 // worker processes jobs sequentially from workChan.
 func (q *Queue) worker(workerID int) {
 	for {
@@ -289,6 +314,20 @@ func (q *Queue) processJob(job *Job) {
 		job.DestPath = filepath.Join(q.cfg.Destination, filename)
 		job.Format = q.cfg.Audio.Format
 		job.Bitrate = q.cfg.Audio.Bitrate
+
+		// Duplicate detection: check if file already exists in destination
+		if _, statErr := os.Stat(job.DestPath); statErr == nil {
+			job.Status = StatusCompleted
+			job.Progress = 100.0
+			job.EndTime = time.Now()
+			job.ErrorMsg = "[Existing file found in destination]"
+			q.mu.Lock()
+			q.completed = append(q.completed, job)
+			q.mu.Unlock()
+			q.notify(job)
+			return
+		}
+
 		job.Status = StatusDownloading
 		q.notify(job)
 

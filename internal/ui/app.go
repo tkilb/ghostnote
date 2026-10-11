@@ -39,6 +39,8 @@ type AppModel struct {
 	EditModal    editmodal.Model
 	ShowHelp     bool
 
+	DependencyWarning string
+
 	Width  int
 	Height int
 }
@@ -60,17 +62,25 @@ func (b *queueBridge) OnJobUpdated(job *engine.Job) {
 
 // NewAppModel creates and initializes the application model.
 func NewAppModel(cfg *config.Config, q *engine.Queue) AppModel {
+	var depWarn string
+	if err := engine.CheckYtDlp(); err != nil {
+		depWarn = "yt-dlp missing"
+	} else if err := engine.CheckFFmpeg(); err != nil {
+		depWarn = "ffmpeg missing"
+	}
+
 	return AppModel{
-		Cfg:          cfg,
-		Queue:        q,
-		Focused:      PanelQueue,
-		ConfigPanel:  configpanel.New(cfg),
-		QueuePanel:   queuepanel.New(q),
-		CompPanel:    completedpanel.New(q),
-		DetailsPanel: detailspanel.New(),
-		AddModal:     addmodal.New(),
-		DirPicker:    dirpicker.New(cfg.Destination),
-		EditModal:    editmodal.New(),
+		Cfg:               cfg,
+		Queue:             q,
+		Focused:           PanelQueue,
+		ConfigPanel:       configpanel.New(cfg),
+		QueuePanel:        queuepanel.New(q),
+		CompPanel:         completedpanel.New(q),
+		DetailsPanel:      detailspanel.New(),
+		AddModal:          addmodal.New(),
+		DirPicker:         dirpicker.New(cfg.Destination),
+		EditModal:         editmodal.New(),
+		DependencyWarning: depWarn,
 	}
 }
 
@@ -214,6 +224,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+		case "r":
+			if m.Focused == PanelQueue {
+				if sel := m.QueuePanel.SelectedJob(); sel != nil {
+					m.Queue.RetryJob(sel.ID)
+					m.updateDetailsSelection()
+				}
+			}
+			return m, nil
 		case "c":
 			m.Queue.ClearCompleted()
 			m.updateDetailsSelection()
@@ -337,7 +355,7 @@ func (m AppModel) View() string {
 		rightColumn,
 	)
 
-	statusBar := statusbar.View(m.Width)
+	statusBar := statusbar.View(m.Width, m.DependencyWarning)
 	fullView := lipgloss.JoinVertical(lipgloss.Left, grid, statusBar)
 
 	if m.ShowHelp {

@@ -7,8 +7,8 @@ import (
 	"github.com/tylerkilburn/ghostnote/internal/ui/panel"
 )
 
-// View renders the bottom key hints bar.
-func View(width int) string {
+// View renders the bottom key hints bar and optional warning tag.
+func View(width int, warning string) string {
 	hints := []struct {
 		key  string
 		desc string
@@ -18,6 +18,7 @@ func View(width int) string {
 		{"[a]", "add"},
 		{"[d]", "dest"},
 		{"[f]", "format"},
+		{"[r]", "retry"},
 		{"[?]", "help"},
 		{"[q]", "quit"},
 	}
@@ -29,6 +30,22 @@ func View(width int) string {
 		parts = append(parts, k+" "+d)
 	}
 
-	text := " " + strings.Join(parts, "  ")
-	return lipgloss.NewStyle().Width(width).Render(text)
+	leftText := " " + strings.Join(parts, "  ")
+	if warning == "" {
+		return lipgloss.NewStyle().Width(width).Render(leftText)
+	}
+
+	warnTag := lipgloss.NewStyle().Bold(true).Foreground(panel.PaletteRed).Render(" ⚠ " + warning + " ")
+	return lipgloss.JoinHorizontal(lipgloss.Top,
+		leftText,
+		strings.Repeat(" ", max(0, width-lipgloss.Width(leftText)-lipgloss.Width(warnTag))),
+		warnTag,
+	)
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

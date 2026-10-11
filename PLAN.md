@@ -225,10 +225,10 @@ ghostnote/
 - [x] Implement `[0] Details` inline metadata editing modal (`e` key) to modify tags before/after slicing.
 
 ### Phase 4: Polish & Refinement
-- [ ] Duplicate detection (scan target directory prior to download).
-- [ ] Queue actions: retry (`r`), cancel (`x`), clear completed (`c`).
-- [ ] Audio format quick-toggle (`f` key: MP3 / FLAC / Opus / Copy).
-- [ ] Error handling popups for missing `yt-dlp` / `ffmpeg` dependencies.
+- [x] Duplicate detection (scan target directory prior to download).
+- [x] Queue actions: retry (`r`), cancel (`x`), clear completed (`c`).
+- [x] Audio format quick-toggle (`f` key: MP3 / FLAC / Opus / Copy).
+- [x] Error handling & dependency status indication for missing `yt-dlp` / `ffmpeg` dependencies.
 
 ---
 
