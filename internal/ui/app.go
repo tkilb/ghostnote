@@ -10,6 +10,7 @@ import (
 	"github.com/tylerkilburn/ghostnote/internal/ui/configpanel"
 	"github.com/tylerkilburn/ghostnote/internal/ui/detailspanel"
 	"github.com/tylerkilburn/ghostnote/internal/ui/dirpicker"
+	"github.com/tylerkilburn/ghostnote/internal/ui/editmodal"
 	"github.com/tylerkilburn/ghostnote/internal/ui/helppopup"
 	"github.com/tylerkilburn/ghostnote/internal/ui/queuepanel"
 	"github.com/tylerkilburn/ghostnote/internal/ui/statusbar"
@@ -35,6 +36,7 @@ type AppModel struct {
 	DetailsPanel detailspanel.Model
 	AddModal     addmodal.Model
 	DirPicker    dirpicker.Model
+	EditModal    editmodal.Model
 	ShowHelp     bool
 
 	Width  int
@@ -68,6 +70,7 @@ func NewAppModel(cfg *config.Config, q *engine.Queue) AppModel {
 		DetailsPanel: detailspanel.New(),
 		AddModal:     addmodal.New(),
 		DirPicker:    dirpicker.New(cfg.Destination),
+		EditModal:    editmodal.New(),
 	}
 }
 
@@ -139,6 +142,23 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if m.EditModal.Active {
+			switch msg.String() {
+			case "esc":
+				m.EditModal.Close()
+				return m, nil
+			case "enter":
+				m.EditModal.Save()
+				m.EditModal.Close()
+				m.updateDetailsSelection()
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.EditModal, cmd = m.EditModal.Update(msg)
+				return m, cmd
+			}
+		}
+
 		// Global keys
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -172,6 +192,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "f":
 			m.toggleFormat()
+			return m, nil
+		case "e":
+			if m.DetailsPanel.Job != nil {
+				m.EditModal.Open(m.DetailsPanel.Job)
+			}
 			return m, nil
 		case "up":
 			m.handleUp()
@@ -323,6 +348,9 @@ func (m AppModel) View() string {
 	}
 	if m.DirPicker.Active {
 		return m.DirPicker.View(m.Width, m.Height)
+	}
+	if m.EditModal.Active {
+		return m.EditModal.View(m.Width, m.Height)
 	}
 
 	return fullView

@@ -222,7 +222,7 @@ ghostnote/
   - Detect single track vs chaptered OST.
   - Expand OST chapters into individual child queue items.
 - [x] Wire live download progress, slicing status, and completion state into `[2] Queue`.
-- [ ] Implement `[0] Details` inline metadata editing modal (`e` key) to modify tags before/after slicing.
+- [x] Implement `[0] Details` inline metadata editing modal (`e` key) to modify tags before/after slicing.
 
 ### Phase 4: Polish & Refinement
 - [ ] Duplicate detection (scan target directory prior to download).
