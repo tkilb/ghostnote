@@ -147,9 +147,9 @@ func (m Model) View(width, height int) string {
 
 	for i := start; i < end; i++ {
 		e := m.Entries[i]
-		line := fmt.Sprintf("   📁 %s", e)
+		line := fmt.Sprintf("   󰉋 %s", e)
 		if i == m.Cursor {
-			line = panel.CursorRowStyle.Render(fmt.Sprintf(" > 📁 %s", e))
+			line = panel.CursorRowStyle.Render(fmt.Sprintf(" > 󰉋 %s", e))
 		}
 		lines = append(lines, line)
 	}

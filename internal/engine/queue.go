@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +25,7 @@ type Queue struct {
 	completed []*Job
 	cfg       *config.Config
 	workChan  chan *Job
+	events    chan *Job
 	listeners []QueueListener
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -39,6 +41,7 @@ func NewQueue(cfg *config.Config) *Queue {
 	q := &Queue{
 		cfg:       cfg,
 		workChan:  make(chan *Job, 200),
+		events:    make(chan *Job, 200),
 		ctx:       ctx,
 		cancel:    cancel,
 		cacheDir:  cacheDir,
@@ -61,6 +64,11 @@ func (q *Queue) Close() {
 	q.cancel()
 }
 
+// Events returns a read-only channel of job update events.
+func (q *Queue) Events() <-chan *Job {
+	return q.events
+}
+
 // AddListener registers a listener for job events.
 func (q *Queue) AddListener(l QueueListener) {
 	q.mu.Lock()
@@ -69,6 +77,11 @@ func (q *Queue) AddListener(l QueueListener) {
 }
 
 func (q *Queue) notify(job *Job) {
+	select {
+	case q.events <- job:
+	default:
+	}
+
 	q.mu.RLock()
 	listeners := append([]QueueListener(nil), q.listeners...)
 	q.mu.RUnlock()
@@ -80,7 +93,12 @@ func (q *Queue) notify(job *Job) {
 
 // AddURL queues a URL for inspection, expansion, and download.
 func (q *Queue) AddURL(rawURL string) error {
-	rawURL = filepath.Clean(rawURL)
+	return q.AddURLWithOptions(rawURL, false)
+}
+
+// AddURLWithOptions queues a URL with specific options such as autoSplit.
+func (q *Queue) AddURLWithOptions(rawURL string, autoSplit bool) error {
+	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
 		return fmt.Errorf("empty URL provided")
 	}
@@ -90,6 +108,7 @@ func (q *Queue) AddURL(rawURL string) error {
 		URL:       rawURL,
 		RawTitle:  rawURL,
 		Title:     "Inspecting...",
+		AutoSplit: autoSplit,
 		Status:    StatusQueued,
 		StartTime: time.Now(),
 	}
@@ -201,6 +220,7 @@ func (q *Queue) processJob(job *Job) {
 		meta, err := FetchMetadata(q.ctx, job.URL)
 		if err != nil {
 			job.Status = StatusFailed
+			job.Title = fmt.Sprintf("[Failed] %s", job.URL)
 			job.ErrorMsg = err.Error()
 			q.notify(job)
 			return
@@ -211,96 +231,157 @@ func (q *Queue) processJob(job *Job) {
 		job.Uploader = meta.Uploader
 		job.Thumbnail = meta.Thumbnail
 
-		// Check if chaptered video
-		if len(meta.Chapters) > 0 {
+		// Check if multi-track (either native chapters >= 2 or AutoSplit requested)
+		hasNativeChapters := len(meta.Chapters) >= 2
+		shouldSplit := hasNativeChapters || job.AutoSplit
+
+		if shouldSplit {
 			job.IsParent = true
 			job.Status = StatusDownloading
 			job.Title = fmt.Sprintf("[Album] %s", meta.Title)
 			q.notify(job)
 
-			// Download audio once to cache
-			cachedAudio := filepath.Join(q.cacheDir, fmt.Sprintf("%s.cache", meta.ID))
-			err := DownloadAudio(q.ctx, job.URL, cachedAudio, func(p DownloadProgress) {
-				job.Progress = p.Percent
-				job.Speed = p.Speed
-				job.ETA = p.ETA
-				q.notify(job)
-			})
+			// Download audio once to cache (or reuse existing cached file)
+			cachedAudioPrefix := filepath.Join(q.cacheDir, fmt.Sprintf("%s.cache", meta.ID))
+			cachedAudio := ""
+			if _, statErr := os.Stat(cachedAudioPrefix); statErr == nil {
+				cachedAudio = cachedAudioPrefix
+			} else if matches, _ := filepath.Glob(cachedAudioPrefix + ".*"); len(matches) > 0 {
+				cachedAudio = matches[0]
+			}
 
-			if err != nil {
-				job.Status = StatusFailed
-				job.ErrorMsg = err.Error()
+			if cachedAudio == "" {
+				err := DownloadAudio(q.ctx, job.URL, cachedAudioPrefix, func(p DownloadProgress) {
+					job.Progress = p.Percent
+					job.Speed = p.Speed
+					job.ETA = p.ETA
+					q.notify(job)
+				})
+
+				if err != nil {
+					job.Status = StatusFailed
+					job.ErrorMsg = err.Error()
+					q.notify(job)
+					return
+				}
+
+				// Locate the actual written cache file
+				if _, statErr := os.Stat(cachedAudioPrefix); statErr == nil {
+					cachedAudio = cachedAudioPrefix
+				} else if matches, _ := filepath.Glob(cachedAudioPrefix + ".*"); len(matches) > 0 {
+					cachedAudio = matches[0]
+				} else {
+					job.Status = StatusFailed
+					job.ErrorMsg = fmt.Sprintf("cached audio not found at %s.*", cachedAudioPrefix)
+					q.notify(job)
+					return
+				}
+			}
+
+			// Determine chapters / split tracks
+			var tracksToProcess []YtDlpRawChapter
+			if hasNativeChapters {
+				tracksToProcess = meta.Chapters
+			} else if job.AutoSplit {
+				// Detect silence boundaries
+				splitPoints, _ := DetectSilenceSplits(q.ctx, cachedAudio, meta.Duration)
+				if len(splitPoints) > 0 {
+					var lastTime float64 = 0
+					for i, sp := range splitPoints {
+						tracksToProcess = append(tracksToProcess, YtDlpRawChapter{
+							Title:     fmt.Sprintf("Track %02d", i+1),
+							StartTime: lastTime,
+							EndTime:   sp,
+						})
+						lastTime = sp
+					}
+					// Final trailing track
+					if lastTime < meta.Duration {
+						tracksToProcess = append(tracksToProcess, YtDlpRawChapter{
+							Title:     fmt.Sprintf("Track %02d", len(tracksToProcess)+1),
+							StartTime: lastTime,
+							EndTime:   meta.Duration,
+						})
+					}
+				}
+			}
+
+			// If no split tracks could be determined, fallback to single track
+			if len(tracksToProcess) < 2 {
+				// Fallback to single track below
+			} else {
+				// Expand tracks into queue items
+				totalTracks := len(tracksToProcess)
+				albumFolder := metadata.SanitizeFilename(metadata.CleanTitle(meta.Title))
+				destDir := filepath.Join(q.cfg.Destination, albumFolder)
+				_ = os.MkdirAll(destDir, 0o755)
+
+				for idx, ch := range tracksToProcess {
+					parsed := metadata.ParseArtistAndTitle(ch.Title, meta.Uploader)
+					tags := metadata.TrackTags{
+						Title:       parsed.Title,
+						Artist:      parsed.Artist,
+						Album:       meta.Title,
+						TrackNumber: idx + 1,
+						TotalTracks: totalTracks,
+					}
+
+					filename := tags.GenerateFilename(q.cfg.Naming.OSTPattern, q.cfg.Audio.Format)
+					destPath := filepath.Join(destDir, filename)
+
+					chJob := &Job{
+						ID:          fmt.Sprintf("%s_ch_%d", job.ID, idx+1),
+						URL:         job.URL,
+						Title:       tags.Title,
+						RawTitle:    ch.Title,
+						ParentID:    job.ID,
+						ChapterIdx:  idx + 1,
+						TotalTracks: totalTracks,
+						Tags:        tags,
+						Format:      q.cfg.Audio.Format,
+						Bitrate:     q.cfg.Audio.Bitrate,
+						DestPath:    destPath,
+						CachedFile:  cachedAudio,
+						Status:      StatusSlicing,
+						StartTime:   time.Now(),
+					}
+
+					q.mu.Lock()
+					q.jobs = append(q.jobs, chJob)
+					q.mu.Unlock()
+					q.notify(chJob)
+
+					// Slice and tag
+					sliceErr := SliceAndTag(q.ctx, SliceOptions{
+						SourceFile: cachedAudio,
+						OutputFile: destPath,
+						StartTime:  ch.StartTime,
+						EndTime:    ch.EndTime,
+						Format:     chJob.Format,
+						Bitrate:    chJob.Bitrate,
+						Tags:       tags,
+					})
+
+					if sliceErr != nil {
+						chJob.Status = StatusFailed
+						chJob.ErrorMsg = sliceErr.Error()
+					} else {
+						chJob.Status = StatusCompleted
+						chJob.Progress = 100.0
+						chJob.EndTime = time.Now()
+						q.mu.Lock()
+						q.completed = append(q.completed, chJob)
+						q.mu.Unlock()
+					}
+					q.notify(chJob)
+				}
+
+				job.Status = StatusCompleted
+				job.Progress = 100.0
+				job.EndTime = time.Now()
 				q.notify(job)
 				return
 			}
-
-			// Expand chapters into queue items
-			totalTracks := len(meta.Chapters)
-			for idx, ch := range meta.Chapters {
-				parsed := metadata.ParseArtistAndTitle(ch.Title, meta.Uploader)
-				tags := metadata.TrackTags{
-					Title:       parsed.Title,
-					Artist:      parsed.Artist,
-					Album:       meta.Title,
-					TrackNumber: idx + 1,
-					TotalTracks: totalTracks,
-				}
-
-				filename := tags.GenerateFilename(q.cfg.Naming.OSTPattern, q.cfg.Audio.Format)
-				destPath := filepath.Join(q.cfg.Destination, filename)
-
-				chJob := &Job{
-					ID:          fmt.Sprintf("%s_ch_%d", job.ID, idx+1),
-					URL:         job.URL,
-					Title:       tags.Title,
-					RawTitle:    ch.Title,
-					ParentID:    job.ID,
-					ChapterIdx:  idx + 1,
-					TotalTracks: totalTracks,
-					Tags:        tags,
-					Format:      q.cfg.Audio.Format,
-					Bitrate:     q.cfg.Audio.Bitrate,
-					DestPath:    destPath,
-					CachedFile:  cachedAudio,
-					Status:      StatusSlicing,
-					StartTime:   time.Now(),
-				}
-
-				q.mu.Lock()
-				q.jobs = append(q.jobs, chJob)
-				q.mu.Unlock()
-				q.notify(chJob)
-
-				// Slice and tag
-				sliceErr := SliceAndTag(q.ctx, SliceOptions{
-					SourceFile: cachedAudio,
-					OutputFile: destPath,
-					StartTime:  ch.StartTime,
-					EndTime:    ch.EndTime,
-					Format:     chJob.Format,
-					Bitrate:    chJob.Bitrate,
-					Tags:       tags,
-				})
-
-				if sliceErr != nil {
-					chJob.Status = StatusFailed
-					chJob.ErrorMsg = sliceErr.Error()
-				} else {
-					chJob.Status = StatusCompleted
-					chJob.Progress = 100.0
-					chJob.EndTime = time.Now()
-					q.mu.Lock()
-					q.completed = append(q.completed, chJob)
-					q.mu.Unlock()
-				}
-				q.notify(chJob)
-			}
-
-			job.Status = StatusCompleted
-			job.Progress = 100.0
-			job.EndTime = time.Now()
-			q.notify(job)
-			return
 		}
 
 		// Single Track
@@ -311,7 +392,9 @@ func (q *Queue) processJob(job *Job) {
 			Artist: parsed.Artist,
 		}
 		filename := job.Tags.GenerateFilename(q.cfg.Naming.Pattern, q.cfg.Audio.Format)
-		job.DestPath = filepath.Join(q.cfg.Destination, filename)
+		destDir := q.cfg.Destination
+		_ = os.MkdirAll(destDir, 0o755)
+		job.DestPath = filepath.Join(destDir, filename)
 		job.Format = q.cfg.Audio.Format
 		job.Bitrate = q.cfg.Audio.Bitrate
 

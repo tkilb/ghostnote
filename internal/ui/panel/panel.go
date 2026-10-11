@@ -159,6 +159,10 @@ func topBorderWithRight(title, rightText string, width int, focused bool, lineSt
 
 	tStyle := TitleStyle(focused)
 	rStyle := lipgloss.NewStyle().Foreground(PaletteDim)
+	lowerRight := strings.ToLower(rightText)
+	if strings.Contains(lowerRight, "not installed") || strings.Contains(lowerRight, "missing") {
+		rStyle = lipgloss.NewStyle().Bold(true).Foreground(PaletteRed)
+	}
 
 	titleW := ansi.StringWidth(title)
 	rightW := ansi.StringWidth(rightText)

@@ -64,16 +64,19 @@ func (b *queueBridge) OnJobUpdated(job *engine.Job) {
 func NewAppModel(cfg *config.Config, q *engine.Queue) AppModel {
 	var depWarn string
 	if err := engine.CheckYtDlp(); err != nil {
-		depWarn = "yt-dlp missing"
+		depWarn = "yt-dlp is not installed"
 	} else if err := engine.CheckFFmpeg(); err != nil {
-		depWarn = "ffmpeg missing"
+		depWarn = "ffmpeg is not installed"
 	}
+
+	cp := configpanel.New(cfg)
+	cp.Warning = depWarn
 
 	return AppModel{
 		Cfg:               cfg,
 		Queue:             q,
 		Focused:           PanelQueue,
-		ConfigPanel:       configpanel.New(cfg),
+		ConfigPanel:       cp,
 		QueuePanel:        queuepanel.New(q),
 		CompPanel:         completedpanel.New(q),
 		DetailsPanel:      detailspanel.New(),
@@ -84,14 +87,19 @@ func NewAppModel(cfg *config.Config, q *engine.Queue) AppModel {
 	}
 }
 
-// Init starts the Bubble Tea program.
-func (m AppModel) Init() tea.Cmd {
-	return nil
+func (m AppModel) listenQueueEvents() tea.Cmd {
+	return func() tea.Msg {
+		if m.Queue == nil {
+			return nil
+		}
+		job := <-m.Queue.Events()
+		return JobUpdateMsg{Job: job}
+	}
 }
 
-// SetProgramBridge connects the queue event listener to Bubble Tea program.
-func (m AppModel) SetProgramBridge(p *tea.Program) {
-	m.Queue.AddListener(&queueBridge{p: p})
+// Init starts the Bubble Tea program.
+func (m AppModel) Init() tea.Cmd {
+	return m.listenQueueEvents()
 }
 
 // Update handles incoming messages and keybindings.
@@ -105,9 +113,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case JobUpdateMsg:
 		m.updateDetailsSelection()
-		return m, nil
+		return m, m.listenQueueEvents()
 
 	case tea.KeyMsg:
+		// Always honor Ctrl+C globally, regardless of modal state or active inputs
+		if msg.Type == tea.KeyCtrlC || msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+
 		// Modal priority
 		if m.ShowHelp {
 			if msg.String() == "esc" || msg.String() == "?" || msg.String() == "q" {
@@ -124,9 +137,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				url := m.AddModal.Value()
 				if url != "" {
-					_ = m.Queue.AddURL(url)
+					_ = m.Queue.AddURLWithOptions(url, m.AddModal.AutoSplit)
 				}
 				m.AddModal.Close()
+				m.updateDetailsSelection()
 				return m, nil
 			default:
 				var cmd tea.Cmd
@@ -195,8 +209,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.prevFocus()
 			return m, nil
 		case "a":
-			m.AddModal.Open()
-			return m, nil
+			cmd := m.AddModal.Open()
+			return m, cmd
 		case "d":
 			m.DirPicker.Open(m.Cfg.Destination)
 			return m, nil

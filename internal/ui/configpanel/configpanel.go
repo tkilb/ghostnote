@@ -11,6 +11,7 @@ import (
 // Model represents the [1] Config panel.
 type Model struct {
 	Cfg     *config.Config
+	Warning string
 	Width   int
 	Height  int
 	Focused bool
@@ -46,5 +47,8 @@ func (m Model) View() string {
 	lines = append(lines, " [d] change destination  [f] toggle format")
 
 	body := strings.Join(lines, "\n")
+	if m.Warning != "" {
+		return panel.FrameWithTopRight("[1] Config", m.Warning, body, m.Width, m.Height, m.Focused)
+	}
 	return panel.Frame("[1] Config", body, m.Width, m.Height, m.Focused)
 }

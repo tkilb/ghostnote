@@ -75,6 +75,7 @@ type Job struct {
 	Thumbnail   string
 	Chapters    []Chapter
 	IsParent    bool     // True if this is a parent job that gets expanded into chapters
+	AutoSplit   bool     // True if user requested automatic splitting of continuous audio
 	ParentID    string   // ID of parent job if this is a chapter child
 	ChapterIdx  int      // 1-based index if chapter
 	TotalTracks int      // Total chapters/tracks in album

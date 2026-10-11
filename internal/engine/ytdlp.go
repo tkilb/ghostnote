@@ -15,6 +15,7 @@ import (
 type YtDlpRawMetadata struct {
 	ID          string            `json:"id"`
 	Title       string            `json:"title"`
+	Description string            `json:"description"`
 	Uploader    string            `json:"uploader"`
 	Duration    float64           `json:"duration"`
 	Thumbnail   string            `json:"thumbnail"`

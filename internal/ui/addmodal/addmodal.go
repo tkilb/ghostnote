@@ -1,6 +1,7 @@
 package addmodal
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -13,6 +14,8 @@ import (
 // Model represents the URL input modal.
 type Model struct {
 	TextInput textinput.Model
+	AutoSplit bool
+	FocusIdx  int // 0: TextInput, 1: AutoSplit toggle
 	Active    bool
 	Width     int
 	Height    int
@@ -28,12 +31,15 @@ func New() Model {
 
 	return Model{
 		TextInput: ti,
+		AutoSplit: false,
+		FocusIdx:  0,
 	}
 }
 
 // Open activates the modal and pre-fills from system clipboard if valid URL.
-func (m *Model) Open() {
+func (m *Model) Open() tea.Cmd {
 	m.Active = true
+	m.FocusIdx = 0
 	m.TextInput.Reset()
 	if clip, err := clipboard.ReadAll(); err == nil {
 		trimmed := strings.TrimSpace(clip)
@@ -41,7 +47,7 @@ func (m *Model) Open() {
 			m.TextInput.SetValue(trimmed)
 		}
 	}
-	m.TextInput.Focus()
+	return m.TextInput.Focus()
 }
 
 // Close deactivates the modal.
@@ -56,9 +62,32 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	var cmd tea.Cmd
-	m.TextInput, cmd = m.TextInput.Update(msg)
-	return m, cmd
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
+		case "tab", "up", "down":
+			if m.FocusIdx == 0 {
+				m.FocusIdx = 1
+				m.TextInput.Blur()
+			} else {
+				m.FocusIdx = 0
+				m.TextInput.Focus()
+			}
+			return m, nil
+		case " ":
+			if m.FocusIdx == 1 {
+				m.AutoSplit = !m.AutoSplit
+				return m, nil
+			}
+		}
+	}
+
+	if m.FocusIdx == 0 {
+		var cmd tea.Cmd
+		m.TextInput, cmd = m.TextInput.Update(msg)
+		return m, cmd
+	}
+
+	return m, nil
 }
 
 // Value returns current input text.
@@ -85,7 +114,18 @@ func (m Model) View(width, height int) string {
 	lines = append(lines, "")
 	lines = append(lines, " "+m.TextInput.View())
 	lines = append(lines, "")
-	lines = append(lines, panel.StatusDescStyle.Render(" [Enter] Queue Track/Mix   [Esc] Cancel"))
+
+	checkMark := "[ ]"
+	if m.AutoSplit {
+		checkMark = "[x]"
+	}
+	toggleText := fmt.Sprintf(" %s Autosplit continuous mix / pacing", checkMark)
+	if m.FocusIdx == 1 {
+		toggleText = panel.CursorRowStyle.Render(fmt.Sprintf(" > %s Autosplit continuous mix / pacing", checkMark))
+	}
+	lines = append(lines, toggleText)
+	lines = append(lines, "")
+	lines = append(lines, panel.StatusDescStyle.Render(" [Tab] Switch   [Space] Toggle   [Enter] Queue   [Esc] Cancel"))
 
 	content := strings.Join(lines, "\n")
 	box := panel.ModalBoxStyle.Width(boxWidth).Render(content)

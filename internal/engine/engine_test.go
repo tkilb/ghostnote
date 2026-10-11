@@ -87,6 +87,16 @@ func TestQueueOperations(t *testing.T) {
 	if len(q.Jobs()) != 0 {
 		t.Fatalf("expected 0 jobs after removal, got %d", len(q.Jobs()))
 	}
+
+	// Test AddURLWithOptions
+	err := q.AddURLWithOptions("https://example.com/audio", true)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	jobs := q.Jobs()
+	if len(jobs) != 1 || !jobs[0].AutoSplit {
+		t.Fatalf("expected 1 job with AutoSplit=true, got %+v", jobs)
+	}
 }
 
 func TestCheckBinaries(t *testing.T) {
